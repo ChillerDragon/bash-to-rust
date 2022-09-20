@@ -1,0 +1,29 @@
+# bash to rust
+
+THIS IS A JOKE PROJECT! LOOK ELSEWHERE FOR USEUFUL STUFF!
+
+So the idea is that it can take bash code and transpile it into rust code. Sounds cool huh?
+
+
+... but I am not even trying to make it any good so it will be a mess of a codebase and never reach a useful state. Do not get your hopes up.
+To see the pathetic progress check the test/ folder. All those shell scripts. Should be convertable if the CI passes (wait there is no CI !?).
+
+
+## Sample
+
+Input:
+```bash
+#!/bin/bash
+
+mystr="hello world"
+echo "$mystr"
+```
+
+Output:
+```rust
+fn main() {
+// !/bin/bash
+let mystr = String::from("hello world");
+println!("{}", mystr);
+}
+```
