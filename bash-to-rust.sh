@@ -5,6 +5,7 @@ arg_verbose=1
 
 mkdir -p tmp
 
+functions=()
 scope='x'
 function scope_get() {
 	echo "${scope: -1}"
@@ -204,6 +205,52 @@ function match_arithmetic_expansion() {
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
 	return 0
 }
+function match_fun_def() {
+	local stmt="$1"
+	local name
+	local body=''
+	if [[ "$stmt" =~ ^function\ ?([^ ]+)(.*) ]] && ! scope_is_str
+	then
+		name="${BASH_REMATCH[1]}"
+		body="${BASH_REMATCH[2]}"
+	elif [[ "$stmt" =~ ^([^ ]+)\(\)(.*) ]] && ! scope_is_str
+	then
+		name="${BASH_REMATCH[1]}"
+		body="${BASH_REMATCH[2]}"
+	else
+		return 1
+	fi
+	[[ "$name" =~ \(\)$ ]] && name="${name::-2}"
+	functions+=("$name")
+	printf 'fn %s() {\n' "$name" >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	if [ "$body" != "" ]
+	then
+		[[ "$body" =~ [[:space:]]\{ ]] && body="$(echo "$body" | cut -d'{' -f2-)"
+		parse_line "$body"
+	fi
+	return 0
+}
+function match_fun_call() {
+	local stmt="$1"
+	local fun
+	local match=0
+	local name
+	for fun in "${functions[@]}"
+	do
+		if [[ "$stmt" == "$fun" ]]
+		then
+			name="$fun"
+			match=1
+			break
+		fi
+	done
+	[[ "$match" == "1" ]] || return 1
+
+	printf '%s();\n' "$name" >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	return 0
+}
 function match_comment() {
 	local stmt="$1"
 	[[ "$stmt" =~ ^#(.*) ]] || scope_is_str || return 1
@@ -241,12 +288,8 @@ function split_stmts() {
 	echo "$stmt"
 }
 
-:>tmp/main.rs
-
-echo "fn main() {" >> tmp/main.rs
-
-while read -r line
-do
+function parse_line() {
+	local line="$1"
 	if [ "$(scope_get)" == '#' ]
 	then
 		scope_pop > /dev/null
@@ -255,7 +298,7 @@ do
 	then
 		echo "bash: $line"
 	fi
-	match_comment "$line" && continue
+	match_comment "$line" && return
 	while read -r stmt
 	do
 		# a context less "then" is a bash syntax error
@@ -272,6 +315,8 @@ do
 		then
 			printf "        %s\t-> " "$stmt"
 		fi
+		match_fun_call "$stmt" && continue
+		match_fun_def "$stmt" && continue
 		match_if_statement_if "$stmt" && continue
 		match_if_statement_fi "$stmt" && continue
 		match_echo_range "$stmt" && continue
@@ -282,6 +327,15 @@ do
 
 		echo "$stmt" >> tmp/main.rs
 	done < <(split_stmts "$line")
+}
+
+:>tmp/main.rs
+
+echo "fn main() {" >> tmp/main.rs
+
+while read -r line
+do
+	parse_line "$line"
 done < <(awk NF "$arg_infile")
 
 echo "}" >> tmp/main.rs
