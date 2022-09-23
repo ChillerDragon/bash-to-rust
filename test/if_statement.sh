@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# shellcheck disable=SC2050
+
 if [ 2 -gt 1 ]
 then
 	echo "2 greater than 1"
