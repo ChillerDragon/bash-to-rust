@@ -134,7 +134,7 @@ do
 	do
 		if [ "$arg_verbose" -gt 0 ]
 		then
-			printf "        $stmt\t-> "
+			printf "        %s\t-> " "$stmt"
 		fi
 		match_echo "$stmt" && continue
 		match_var_assign "$stmt" && continue
