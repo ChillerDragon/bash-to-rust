@@ -115,6 +115,19 @@ function match_echo() {
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
 	return 0
 }
+function match_echo_range() {
+	local stmt="$1"
+	[[ "$stmt" =~ echo\ \{([a-zA-Z0-9]+)\.\.([a-zA-Z0-9]+)\} ]] || return 1
+
+	local val
+	from="${BASH_REMATCH[1]}"
+	to="${BASH_REMATCH[2]}"
+	printf 'println!("{}", (%d..%d).map(|x|  x.to_string()).collect::<Vec<String>>().join(" "));' \
+		"$from" \
+		"$((to + 1))" >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	return 0
+}
 function match_var_assign() {
 	local stmt="$1"
 	[[ "$stmt" =~ ([a-zA-Z_][a-zA-Z0-9_]*)=(.*) ]] || return 1
@@ -215,6 +228,7 @@ do
 		then
 			printf "        %s\t-> " "$stmt"
 		fi
+		match_echo_range "$stmt" && continue
 		match_echo "$stmt" && continue
 		match_arithmetic_expansion "$stmt" && continue
 		match_var_assign "$stmt" && continue
