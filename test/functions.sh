@@ -13,9 +13,14 @@ posixfun() {
 }
 
 single_line_fun() { echo "foo"; }
+function _single_line_fun() { echo "foo"; }
 
 fun
 posixfun
 kevin_fun
 single_line_fun
+_single_line_fun
+
+echo "function stringfun() { echo 'bar';fun; }"
+# commentfun() { echo "comment";fun; }
 
