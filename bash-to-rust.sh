@@ -159,6 +159,34 @@ function match_str_concat() {
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
 	return 0
 }
+function match_if_statement_if() {
+	local stmt="$1"
+	[[ "$stmt" =~ if\ \[\ (.*)\ (-.+)\ (.*)\ \] ]] || return 1
+
+	local lv
+	local rv
+	local op=''
+	lv="${BASH_REMATCH[1]}" # todo: parse those into proper values supporting strings and quoted numbers etc
+	op="${BASH_REMATCH[2]}"
+	rv="${BASH_REMATCH[3]}"
+	[[ "$op" == "-gt" ]] && op='>'
+	[[ "$op" == "-lt" ]] && op='<'
+	[[ "$op" == "-eq" ]] && op='=='
+	[[ "$op" == "-ne" ]] && op='!='
+	[[ "$op" != "" ]] || return 1
+
+	printf 'if (%s %s %s) {\n' "$lv" "$op" "$rv" >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	return 0
+}
+function match_if_statement_fi() {
+	local stmt="$1"
+	[[ "$stmt" == "fi" ]] || return 1
+
+	printf '}\n' >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	return 0
+}
 function match_arithmetic_expansion() {
 	local stmt="$1"
 	[[ "$stmt" =~ ([a-zA-Z_][a-zA-Z0-9_]*)\=\$\(\((.*)\)\) ]] || return 1
@@ -178,10 +206,11 @@ function match_arithmetic_expansion() {
 }
 function match_comment() {
 	local stmt="$1"
-	[[ "$stmt" =~ ^#(.*) ]] || return 1
+	[[ "$stmt" =~ ^#(.*) ]] || scope_is_str || return 1
 
 	printf '// %s\n' "${BASH_REMATCH[1]}" >> tmp/main.rs
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	scope_push '#'
 	return 0
 }
 
@@ -218,22 +247,38 @@ echo "fn main() {" >> tmp/main.rs
 
 while read -r line
 do
+	if [ "$(scope_get)" == '#' ]
+	then
+		scope_pop > /dev/null
+	fi
 	if [ "$arg_verbose" -gt 0 ]
 	then
 		echo "bash: $line"
 	fi
+	match_comment "$line" && continue
 	while read -r stmt
 	do
+		# a context less "then" is a bash syntax error
+		# otherwise its in the context of a if statement
+		# rust does not need the then it uses the { after the condition
+		# so just drop them all
+		if [[ "$stmt" =~ ^then ]] && ! scope_is_str
+		then
+			stmt="${stmt:4}"
+		fi
+		[[ "$stmt" == "" ]] && continue
+
 		if [ "$arg_verbose" -gt 0 ]
 		then
 			printf "        %s\t-> " "$stmt"
 		fi
+		match_if_statement_if "$stmt" && continue
+		match_if_statement_fi "$stmt" && continue
 		match_echo_range "$stmt" && continue
 		match_echo "$stmt" && continue
 		match_arithmetic_expansion "$stmt" && continue
 		match_var_assign "$stmt" && continue
 		match_str_concat "$stmt" && continue
-		match_comment "$stmt" && continue
 
 		echo "$stmt" >> tmp/main.rs
 	done < <(split_stmts "$line")
