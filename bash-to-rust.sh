@@ -59,6 +59,50 @@ function bash_value_to_rust() {
 	fi
 	echo "$val"
 }
+function bash_value_to_str_slice() {
+	local val="$1"
+	# quoted var
+	if [[ "$val" =~ ^\"\$(.*)\" ]]
+	then
+		val="${BASH_REMATCH[1]}"
+	# unquoted var
+	elif [[ "$val" =~ ^\$([^\ ]*) ]]
+	then
+		val="${BASH_REMATCH[1]}"
+	# number
+	elif [[ "$val" =~ ^[0-9]+$ ]]
+	then
+		val="\"$val\""
+	# quoted string
+	elif [[ "$val" =~ ^\".*\" ]]
+	then
+		test
+	# unquoted string
+	elif [[ "$val" =~ ^([^ ]+) ]]
+	then
+		val="\"${BASH_REMATCH[1]}\""
+	else
+		echo "Failed to match value"
+		exit 1
+	fi
+	echo "$val"
+}
+# this should be done better
+# also accounting for scope
+# and variables including each others name
+# right now
+# it will make foo mutable if barfoo is reassigned
+# also rust can do shadowing so ditch a few mutes
+function need_mutable() {
+	local var="$1"
+	local num_assigns
+	num_assigns="$(grep -cE "$var\+?=" "$arg_infile")"
+	if [[ "$num_assigns" -gt 1 ]]
+	then
+		return 0
+	fi
+	return 1
+}
 
 function match_echo() {
 	local stmt="$1"
@@ -77,10 +121,28 @@ function match_var_assign() {
 
 	local var
 	local val
+	local mut=''
 	var="${BASH_REMATCH[1]}"
 	val="${BASH_REMATCH[2]}"
 	val="$(bash_value_to_rust "$val")"
-	printf 'let %s = %s;\n' "$var" "$val" >> tmp/main.rs
+	if need_mutable "$var"
+	then
+		mut='mut '
+	fi
+	printf 'let %s%s = %s;\n' "$mut" "$var" "$val" >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	return 0
+}
+function match_str_concat() {
+	local stmt="$1"
+	[[ "$stmt" =~ ([a-zA-Z_][a-zA-Z0-9_]*)\+=(.*) ]] || return 1
+
+	local var
+	local val
+	var="${BASH_REMATCH[1]}"
+	val="${BASH_REMATCH[2]}"
+	val="$(bash_value_to_str_slice "$val")"
+	printf '%s = %s + %s;\n' "$var" "$var" "$val" >> tmp/main.rs
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
 	return 0
 }
@@ -138,6 +200,7 @@ do
 		fi
 		match_echo "$stmt" && continue
 		match_var_assign "$stmt" && continue
+		match_str_concat "$stmt" && continue
 		match_comment "$stmt" && continue
 
 		echo "$stmt" >> tmp/main.rs
