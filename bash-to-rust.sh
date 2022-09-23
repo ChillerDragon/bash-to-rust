@@ -122,7 +122,7 @@ function match_echo_range() {
 	local val
 	from="${BASH_REMATCH[1]}"
 	to="${BASH_REMATCH[2]}"
-	printf 'println!("{}", (%d..%d).map(|x|  x.to_string()).collect::<Vec<String>>().join(" "));' \
+	printf 'println!("{}", (%d..%d).map(|x|  x.to_string()).collect::<Vec<String>>().join(" "));\n' \
 		"$from" \
 		"$((to + 1))" >> tmp/main.rs
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
