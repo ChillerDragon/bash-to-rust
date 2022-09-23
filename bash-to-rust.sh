@@ -146,6 +146,23 @@ function match_str_concat() {
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
 	return 0
 }
+function match_arithmetic_expansion() {
+	local stmt="$1"
+	[[ "$stmt" =~ ([a-zA-Z_][a-zA-Z0-9_]*)\=\$\(\((.*)\)\) ]] || return 1
+
+	local res
+	local expression
+	res="${BASH_REMATCH[1]}"
+	expression="${BASH_REMATCH[2]}"
+
+	# # shellcheck wants you do use no $ or quotes in there
+	# but it is possible to do "$(("$num" + 1))"
+	# but that is not supported YET
+
+	printf '%s = %s;\n' "$res" "$expression" >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	return 0
+}
 function match_comment() {
 	local stmt="$1"
 	[[ "$stmt" =~ ^#(.*) ]] || return 1
@@ -199,6 +216,7 @@ do
 			printf "        %s\t-> " "$stmt"
 		fi
 		match_echo "$stmt" && continue
+		match_arithmetic_expansion "$stmt" && continue
 		match_var_assign "$stmt" && continue
 		match_str_concat "$stmt" && continue
 		match_comment "$stmt" && continue
