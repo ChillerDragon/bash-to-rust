@@ -6,28 +6,66 @@ arg_verbose=1
 mkdir -p tmp
 
 functions=()
-scope='x'
-function scope_get() {
-	echo "${scope: -1}"
+str_scope='x'
+function str_scope_get() {
+	echo "${str_scope: -1}"
 }
-function scope_pop() {
-	scope_get
-	if [[ "${scope: -1}" == "x" ]]
+function str_scope_pop() {
+	str_scope_get
+	if [[ "${str_scope: -1}" == "x" ]]
 	then
 		return
 	fi
-	scope="${scope::-1}"
+	str_scope="${str_scope::-1}"
 }
-function scope_push() {
-	scope+="$1"
+function str_scope_push() {
+	str_scope+="$1"
 }
 function scope_is_str() {
 	local s
-	s="$(scope_get)"
+	s="$(str_scope_get)"
 	[[ "$s" == '"' ]] && return 0 # double quote
 	[[ "$s" == "'" ]] && return 0 # single quote
 	[[ "$s" == '$' ]] && return 0 # dollar string $''
 	[[ "$s" == 'h' ]] && return 0 # HereDoc
+
+	return 1
+}
+fn_scope='m'
+function fn_scope_get() {
+	echo "${fn_scope: -1}"
+}
+function fn_scope_pop() {
+	fn_scope_get
+	# m is main function
+	# as of right now we can not leave that scope
+	if [[ "${fn_scope: -1}" == "m" ]]
+	then
+		return
+	fi
+	fn_scope="${fn_scope::-1}"
+}
+function fn_scope_push() {
+	fn_scope+="$1"
+}
+function scope_is_main_fn() {
+	local s
+	s="$(fn_scope_get)"
+	[[ "$s" == 'm' ]] && return 0
+
+	return 1
+}
+function scope_is_str_fn() {
+	# returns true
+	# if current scope
+	# is a function that returns
+	# a string
+	# which is all functions that print to stdout in bash
+	local s
+	s="$(fn_scope_get)"
+	[[ "$s" == 's' ]] && return 0 # bash echo, rust return String
+	[[ "$s" == "i" ]] && return 0 # bash echo, rust return int
+	[[ "$s" == 'r' ]] && return 0 # bash return no echo, rust return int
 
 	return 1
 }
@@ -111,9 +149,17 @@ function match_echo() {
 
 	local val
 	val="${BASH_REMATCH[1]}"
-	val="$(bash_value_to_rust "$val")"
-	printf 'println!("{}", %s);\n' "$val" >> tmp/main.rs
-	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	val="$(bash_value_to_str_slice "$val")"
+	if scope_is_str_fn
+	then
+		printf '__bash_stdout += %s;\n' "$val" >> tmp/main.rs
+		[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+		printf '__bash_stdout += "\n";\n' >> tmp/main.rs
+		[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	else
+		printf 'println!("{}", %s);\n' "$val" >> tmp/main.rs
+		[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	fi
 	return 0
 }
 function match_echo_range() {
@@ -205,6 +251,30 @@ function match_arithmetic_expansion() {
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
 	return 0
 }
+function match_assign_to_subshell() {
+	local stmt="$1"
+	[[ "$stmt" =~ ([a-zA-Z_][a-zA-Z0-9_]*)\=\"?\$\((.*)\)\"? ]] || return 1
+
+	local res
+	local sub_code
+	local fun
+	local match
+	res="${BASH_REMATCH[1]}"
+	sub_code="${BASH_REMATCH[2]}"
+	for fun in "${functions[@]}"
+	do
+		if [[ "$sub_code" == "$fun" ]]
+		then
+			match=1
+			break
+		fi
+	done
+	[[ "$match" == "1" ]] || return 1
+
+	printf 'let %s = %s(false);\n' "$res" "$sub_code" >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	return 0
+}
 function match_fun_def() {
 	local stmt="$1"
 	local name
@@ -222,13 +292,44 @@ function match_fun_def() {
 	fi
 	[[ "$name" =~ \(\)$ ]] && name="${name::-2}"
 	functions+=("$name")
-	printf 'fn %s() {\n' "$name" >> tmp/main.rs
+	# always assume that the function prints to stdout
+	# and that this string will be catched by a subshell
+	# thus we mark it as "s" and return a String in rust
+	fn_scope_push s
+	printf "fn %s(print: bool) -> String {\n" "$name" >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	echo 'let mut __bash_stdout = String::from("");' >> tmp/main.rs
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
 	if [ "$body" != "" ]
 	then
 		[[ "$body" =~ [[:space:]]\{ ]] && body="$(echo "$body" | cut -d'{' -f2-)"
 		parse_line "$body"
 	fi
+	return 0
+}
+function match_fun_def_end() {
+	local stmt="$1"
+	[[ "$stmt" == "}" ]] || return 1
+	if ! scope_is_str_fn
+	then
+		return 1
+	fi
+
+	fn_scope_pop >/dev/null
+
+	echo 'if print {' >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	# TODO: should probably flush because print! does not
+	echo '  print!("{}", __bash_stdout);' >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	echo '}' >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	echo 'strip_trailing_nl(&mut __bash_stdout);' >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	echo '__bash_stdout' >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
+	echo '}' >> tmp/main.rs
+	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
 	return 0
 }
 function match_fun_call() {
@@ -247,7 +348,7 @@ function match_fun_call() {
 	done
 	[[ "$match" == "1" ]] || return 1
 
-	printf '%s();\n' "$name" >> tmp/main.rs
+	printf '%s(true);\n' "$name" >> tmp/main.rs
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
 	return 0
 }
@@ -257,7 +358,7 @@ function match_comment() {
 
 	printf '// %s\n' "${BASH_REMATCH[1]}" >> tmp/main.rs
 	[[ "$arg_verbose" -gt 0 ]] && tail -n1 tmp/main.rs
-	scope_push '#'
+	str_scope_push '#'
 	return 0
 }
 
@@ -277,11 +378,11 @@ function split_stmts() {
 		fi
 		if [[ "$char" == "'" ]] || [[ "$char" == '"' ]]
 		then
-			if [[ "$(scope_get)" == "$char" ]]
+			if [[ "$(str_scope_get)" == "$char" ]]
 			then
-				scope_pop >/dev/null
+				str_scope_pop >/dev/null
 			else
-				scope_push "$char"
+				str_scope_push "$char"
 			fi
 		fi
 	done < <(echo -n "$line")
@@ -290,9 +391,9 @@ function split_stmts() {
 
 function parse_line() {
 	local line="$1"
-	if [ "$(scope_get)" == '#' ]
+	if [ "$(str_scope_get)" == '#' ]
 	then
-		scope_pop > /dev/null
+		str_scope_pop > /dev/null
 	fi
 	if [ "$arg_verbose" -gt 0 ]
 	then
@@ -317,11 +418,13 @@ function parse_line() {
 		fi
 		match_fun_call "$stmt" && continue
 		match_fun_def "$stmt" && continue
+		match_fun_def_end "$stmt" && continue
 		match_if_statement_if "$stmt" && continue
 		match_if_statement_fi "$stmt" && continue
 		match_echo_range "$stmt" && continue
 		match_echo "$stmt" && continue
 		match_arithmetic_expansion "$stmt" && continue
+		match_assign_to_subshell "$stmt" && continue
 		match_var_assign "$stmt" && continue
 		match_str_concat "$stmt" && continue
 
@@ -331,6 +434,18 @@ function parse_line() {
 
 :>tmp/main.rs
 
+cat << 'EOF' >> tmp/main.rs
+fn strip_trailing_nl(input: &mut String) {
+    let new_len = input
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !matches!(c, '\n' | '\r'))
+        .map_or(0, |(i, _)| i + 1);
+    if new_len != input.len() {
+        input.truncate(new_len);
+    }
+}
+EOF
 echo "fn main() {" >> tmp/main.rs
 
 while read -r line
