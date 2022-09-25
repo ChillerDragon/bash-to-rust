@@ -6,7 +6,7 @@ So the idea is that it can take bash code and transpile it into rust code. Sound
 
 
 ... but I am not even trying to make it any good so it will be a mess of a codebase and never reach a useful state. Do not get your hopes up.
-To see the pathetic progress check the test/ folder. All those shell scripts should be convertable if the CI passes.
+To see the pathetic progress check the transpile_tests/ folder. All those shell scripts should be convertable if the CI passes.
 
 
 ## Sample

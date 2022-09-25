@@ -1,6 +1,7 @@
 #!/bin/bash
 
-for t in ./test/*.sh
+echo "[*] transpile tests"
+for t in ./transpile_tests/*.sh
 do
 	./bash-to-rust.sh --bin a.out "$t"
 	d="$(diff <(./a.out) <(bash "$t"))"
@@ -12,5 +13,11 @@ do
 	else
 		printf '.'
 	fi
+done
+
+echo "[*] unit tests"
+for t in ./unit_tests/*.sh
+do
+	$t || exit 1
 done
 
