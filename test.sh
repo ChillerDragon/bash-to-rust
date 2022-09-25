@@ -4,6 +4,8 @@
 #
 # ./test.sh -v
 
+source lib/colors.sh
+
 echo "[*] transpile tests"
 for t in ./transpile_tests/*.sh
 do
@@ -21,13 +23,15 @@ do
 		echo "$d"
 		exit 1
 	else
-		printf '.'
+		printf '%b.%b' "$GREEN" "$RESET"
 	fi
 done
+echo ""
 
 echo "[*] unit tests"
 for t in ./unit_tests/*.sh
 do
 	$t || exit 1
 done
+echo ""
 

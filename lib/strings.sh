@@ -118,7 +118,6 @@ function bash_value_to_str_slice() {
 	elif [[ "$val" =~ ^\".*\"$ ]]
 	then
 		local oldval="$val"
-		interpolate_to_fmt "$val" >&2
 		val="$(interpolate_to_fmt "$val")"
 		# no interpolation found
 		# fallback to quoted str slice
