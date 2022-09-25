@@ -2,10 +2,116 @@
 
 source lib/strings.sh
 
-arg_infile="$3"
-arg_verbose=1
+arg_infile=""
+arg_outfile=""
+arg_verbose=0
 
 mkdir -p tmp
+
+function show_help() {
+	echo "usage: $(basename "$0") [OPTIONS] <bash script>"
+	echo "options:"
+	echo " --verbose|-v	verbose debug output use -vv for even more verbosity"
+	echo " --bin <name>	compiled rust binary name (default: a.out)"
+}
+
+function parse_args() {
+	local arg
+	local flag
+	local flags
+	local opt
+	local stop_args=0
+	if [[ "$#" -eq "0" ]]
+	then
+		show_help
+		exit 1
+	fi
+	while true
+	do
+		[[ "$#" -gt "0" ]] || break
+		arg="$1"
+		shift
+
+		if [ "$arg" == "--" ]
+		then
+			stop_args=1
+			continue
+		fi
+
+		if [[ "${arg::2}" == "--" ]] && [[ "$stop_args" == "0" ]]
+		then
+			opt="${arg:2}"
+			if [[ "$opt" == "help" ]]
+			then
+				show_help
+				exit 0
+			elif [[ "$opt" == "verbose" ]]
+			then
+				arg_verbose=1
+			elif [[ "$opt" == "bin" ]]
+			then
+				arg_outfile="$1"
+				shift
+				if [ "$arg_outfile" == "" ]
+				then
+					echo "Error: output file can not be empty"
+					exit 1
+				fi
+				if [ -d "$arg_outfile" ]
+				then
+					echo "Error: output file $arg_outfile conflicts with folder"
+					exit 1
+				fi
+			else
+				echo "Error: unkown option '$arg' try --help"
+				exit 1
+			fi
+		elif [[ "${arg::1}" == "-" ]] && [[ "$stop_args" == "0" ]]
+		then
+			flags="${arg:1}"
+			while IFS= read -n1 -r flag
+			do
+				if [[ "$flag" == "v" ]]
+				then
+					arg_verbose="$((arg_verbose+1))"
+				elif [[ "$flag" == "h" ]]
+				then
+					show_help
+					exit 0
+				else
+					echo "Error: unkown flag '$flag'"
+					exit 1
+				fi
+			done < <(echo -n "$flags")
+		else
+			if [ "$arg_infile" == "" ]
+			then
+				arg_infile="$arg"
+				if [ ! -f "$arg_infile" ]
+				then
+					echo "Error: file not found '$arg_infile'"
+					exit 1
+				fi
+			else
+				# todo: support multiple infiles
+				echo "Error: unknown option '$arg' try --help"
+				exit 1
+			fi
+		fi
+	done
+}
+
+parse_args "$@"
+
+if [ "$arg_outfile" == "" ]
+then
+	arg_outfile=a.out
+fi
+if [ "$arg_infile" == "" ]
+then
+	echo "Error: you have to specify a input script"
+	exit 1
+fi
 
 functions=()
 str_scope='x'
@@ -401,5 +507,10 @@ done < <(awk NF "$arg_infile")
 
 echo "}" >> tmp/main.rs
 
-rustc -o a.out tmp/main.rs
+if [ "$arg_verbose" -gt "0" ]
+then
+	rustc -o "$arg_outfile" tmp/main.rs
+else
+	rustc -o "$arg_outfile" tmp/main.rs &>/dev/null
+fi
 
